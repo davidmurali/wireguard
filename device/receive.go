@@ -126,7 +126,8 @@ func (device *Device) RoutineReceiveIncoming(recv conn.ReceiveFunc) {
 
 		// check if transport
 
-		case MessageTransportType:
+		case MessageTransportTypeEncrypted,
+			MessageTransportTypePlain:
 
 			// check size
 
@@ -204,6 +205,7 @@ func (device *Device) RoutineReceiveIncoming(recv conn.ReceiveFunc) {
 
 func (device *Device) RoutineDecryption(id int) {
 	var nonce [chacha20poly1305.NonceSize]byte
+	var paddingZeros [PaddingMultiple]byte
 
 	defer device.log.Verbosef("Routine: decryption worker %d - stopped", id)
 	device.log.Verbosef("Routine: decryption worker %d - started", id)
@@ -211,21 +213,47 @@ func (device *Device) RoutineDecryption(id int) {
 	for elem := range device.queue.decryption.c {
 		// split message into fields
 		counter := elem.packet[MessageTransportOffsetCounter:MessageTransportOffsetContent]
-		content := elem.packet[MessageTransportOffsetContent:]
-
 		// decrypt and release to consumer
 		var err error
 		elem.counter = binary.LittleEndian.Uint64(counter)
 		// copy counter to nonce
 		binary.LittleEndian.PutUint64(nonce[0x4:0xc], elem.counter)
-		elem.packet, err = elem.keypair.receive.Open(
-			content[:0],
-			nonce[:],
-			content,
-			nil,
-		)
-		if err != nil {
-			elem.packet = nil
+		msgType := binary.LittleEndian.Uint32(elem.packet[:4]) //getting message type
+		if msgType == MessageTransportTypeEncrypted {          // decrypted only http ports
+			content := elem.packet[MessageTransportOffsetContent:]
+			elem.packet, err = elem.keypair.receive.Open(
+				content[:0],
+				nonce[:],
+				content,
+				nil,
+			)
+			if err != nil {
+				elem.packet = nil
+			}
+		} else { // bypassing only https
+			packetLen := len(elem.packet)
+			//extracting the size of encrypted data from the elem.packet
+			var decryptSize uint8 = elem.packet[packetLen-1]
+			//getting header details from packet to decrypt
+			decryptData := elem.packet[MessageTransportOffsetContent:decryptSize]
+			//getting packet data
+			packetData := append([]byte(nil), elem.packet[decryptSize:packetLen-1]...)
+			binary.LittleEndian.PutUint64(nonce[0x4:0xc], elem.counter)
+			elem.packet, err = elem.keypair.receive.Open(
+				decryptData[:0],
+				nonce[:],
+				decryptData,
+				nil,
+			)
+			if err != nil {
+				device.log.Verbosef("packetData Error - %s", err.Error())
+				elem.packet = nil
+			}
+			// extracting the encrypted Header
+			elem.packet = append(elem.packet[:MessageEncryptHeaderSize], packetData...)
+			// length of packet with padding zeros
+			paddingSize := calculatePaddingSize(len(elem.packet), int(atomic.LoadInt32(&device.tun.mtu)))
+			elem.packet = append(elem.packet, paddingZeros[:paddingSize]...)
 		}
 		elem.Unlock()
 	}
