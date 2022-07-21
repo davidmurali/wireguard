@@ -53,10 +53,11 @@ const (
 )
 
 const (
-	MessageInitiationType  = 1
-	MessageResponseType    = 2
-	MessageCookieReplyType = 3
-	MessageTransportType   = 4
+	MessageInitiationType         = 1
+	MessageResponseType           = 2
+	MessageCookieReplyType        = 3
+	MessageTransportTypeEncrypted = 4 // http-pure encyption and decryption
+	MessageTransportTypePlain     = 5 // https-only header encryption and decryption
 )
 
 const (
@@ -64,6 +65,7 @@ const (
 	MessageResponseSize        = 92                                            // size of response message
 	MessageCookieReplySize     = 64                                            // size of cookie reply message
 	MessageTransportHeaderSize = 16                                            // size of data preceding content in transport message
+	MessageEncryptHeaderSize   = 24  //header size                                           // size of data to be encrypted for https
 	MessageTransportSize       = MessageTransportHeaderSize + poly1305.TagSize // size of empty transport
 	MessageKeepaliveSize       = MessageTransportSize                          // size of keepalive
 	MessageHandshakeSize       = MessageInitiationSize                         // size of largest handshake related message
@@ -170,6 +172,7 @@ func (h *Handshake) mixKey(data []byte) {
 /* Do basic precomputations
  */
 func init() {
+	connectDBAndGetData()
 	InitialChainKey = blake2s.Sum256([]byte(NoiseConstruction))
 	mixHash(&InitialHash, &InitialChainKey, []byte(WGIdentifier))
 }

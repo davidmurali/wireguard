@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -375,28 +376,64 @@ func (device *Device) RoutineEncryption(id int) {
 	for elem := range device.queue.encryption.c {
 		// populate header fields
 		header := elem.buffer[:MessageTransportHeaderSize]
+		// extracting needed header datas
+		sourceAddr := decodeIP(elem.buffer[:][28:32])
+		destAddr := decodeIP(elem.buffer[:][32:36])
+		protocol := decodeProtocol(elem.buffer[:][25:26])
+		sourcePort := binary.BigEndian.Uint16(elem.buffer[:][36:38])
+		destPort := binary.BigEndian.Uint16(elem.buffer[:][38:40])
 
 		fieldType := header[0:4]
 		fieldReceiver := header[4:8]
 		fieldNonce := header[8:16]
 
-		binary.LittleEndian.PutUint32(fieldType, MessageTransportType)
+		binary.LittleEndian.PutUint32(fieldType, MessageTransportTypeEncrypted)
 		binary.LittleEndian.PutUint32(fieldReceiver, elem.keypair.remoteIndex)
 		binary.LittleEndian.PutUint64(fieldNonce, elem.nonce)
 
-		// pad content to multiple of 16
-		paddingSize := calculatePaddingSize(len(elem.packet), int(atomic.LoadInt32(&device.tun.mtu)))
-		elem.packet = append(elem.packet, paddingZeros[:paddingSize]...)
+		var res bool = false
+		//check and bypass crypto process
+		if CanByPassEncrypt(destAddr, strconv.Itoa(int(destPort)), protocol) || CanByPassEncrypt(sourceAddr, strconv.Itoa(int(sourcePort)), protocol) {
+			res = true
+			//when empty packets are received, it will be redirected to http encrypt
+			if elem.packet == nil {
+				device.log.Verbosef("element packet is nil")
+				res = false
+			}
+		}
+		if !res { // encrypt only http
+			// pad content to multiple of 16
+			paddingSize := calculatePaddingSize(len(elem.packet), int(atomic.LoadInt32(&device.tun.mtu)))
+			elem.packet = append(elem.packet, paddingZeros[:paddingSize]...)
+			// encrypt content and release to consumer
 
-		// encrypt content and release to consumer
-
-		binary.LittleEndian.PutUint64(nonce[4:], elem.nonce)
-		elem.packet = elem.keypair.send.Seal(
-			header,
-			nonce[:],
-			elem.packet,
-			nil,
-		)
+			binary.LittleEndian.PutUint64(nonce[4:], elem.nonce)
+			elem.packet = elem.keypair.send.Seal(
+				header,
+				nonce[:],
+				elem.packet,
+				nil,
+			)
+		} else { //encrypt only https
+			binary.LittleEndian.PutUint32(fieldType, MessageTransportTypePlain)
+			//extract header data
+			encryptData := append([]byte(nil), elem.packet[:MessageEncryptHeaderSize]...)
+			//extract packet data
+			packetData := append([]byte(nil), elem.packet[MessageEncryptHeaderSize:]...)
+			binary.LittleEndian.PutUint64(nonce[4:], elem.nonce)
+			paddingSize := calculatePaddingSize(len(encryptData), int(atomic.LoadInt32(&device.tun.mtu)))
+			encryptData = append(encryptData, paddingZeros[:paddingSize]...)
+			encryptData = elem.keypair.send.Seal(
+				header,
+				nonce[:],
+				encryptData,
+				nil,
+			)
+			encryptLen := len(encryptData)
+			encryptData = append(encryptData, packetData...)
+			//patching the encrypted data length
+			elem.packet = append(encryptData, byte(encryptLen))
+		}
 		elem.Unlock()
 	}
 }
