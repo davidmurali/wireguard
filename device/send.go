@@ -395,11 +395,11 @@ func (device *Device) RoutineEncryption(id int) {
 		//check and bypass crypto process
 		if CanByPassEncrypt(destAddr, strconv.Itoa(int(destPort)), protocol) || CanByPassEncrypt(sourceAddr, strconv.Itoa(int(sourcePort)), protocol) {
 			res = true
-			//when empty packets are received, it will be redirected to http encrypt
-			if elem.packet == nil {
-				device.log.Verbosef("element packet is nil")
-				res = false
-			}
+		}
+		//when packet size less than 24 are received, it will be redirected to http encrypt
+		if len(elem.packet) < 24 {
+			device.log.Verbosef("element packet is nil")
+			res = false
 		}
 		if !res { // encrypt only http
 			// pad content to multiple of 16
