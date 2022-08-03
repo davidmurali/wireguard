@@ -1,77 +1,105 @@
-# Go Implementation of [WireGuard](https://www.wireguard.com/)
 
-This is an implementation of WireGuard in Go.
 
-## Usage
+## This document can be used to compile and run user-space wireguard or to set up native-space wireguard
 
-Most Linux kernel WireGuard users are used to adding an interface with `ip link add wg0 type wireguard`. With wireguard-go, instead simply run:
+### step-1: Install native space wireguard
+    sudo apt update
+    sudo apt install wireguard
+    sudo apt install net-tools
 
-```
-$ wireguard-go wg0
-```
+### step-2: Create a private and public key
+     wg genkey | sudo tee /etc/wireguard/private.key
+     sudo chmod go= /etc/wireguard/private.key
 
-This will create an interface and fork into the background. To remove the interface, use the usual `ip link del wg0`, or if your system does not support removing interfaces directly, you may instead remove the control socket via `rm -f /var/run/wireguard/wg0.sock`, which will result in wireguard-go shutting down.
+### step-3: Download and install go
+    wget https://go.dev/dl/go1.18.3.linux-amd64.tar.gz
+    tar -xf go1.18.3.linux-amd64.tar.gz
+    mv ./go /usr/local
+	
+### step-4: Setting up the go env variable in profile
+    nano ~/.profile
 
-To run wireguard-go without forking to the background, pass `-f` or `--foreground`:
+### step-5: Add below to end of file (~/.profile)
+    export PATH=$PATH:/usr/local/go/bin
 
-```
-$ wireguard-go -f wg0
-```
+### step-6: Save env variables
+    source ~/.profile
 
-When an interface is running, you may use [`wg(8)`](https://git.zx2c4.com/wireguard-tools/about/src/man/wg.8) to configure it, as well as the usual `ip(8)` and `ifconfig(8)` commands.
+### step-7: Create link for resolvconf, to use a peer as a DNS server
+    ln -s /usr/bin/resolvectl /usr/local/bin/resolvconf
+    apt-get install build-essential
 
-To run with more logging you may set the environment variable `LOG_LEVEL=debug`.
+## Above steps(1-7) needs to be done for both client and server
 
-## Platforms
+### step-8: Create wg0.conf file in server and paste the below content
+	sudo nano /etc/wireguard/wg0.conf
 
-### Linux
+	[Interface]
+	Address = 10.0.0.1/24
+	MTU=1420
+	ListenPort = 51820	
+	#privatekey of server
+	PrivateKey = eNEAagtiA/CxwpTb8jvTkilwsYNbMojZXyH005lwVVQ= 
+    	PostUp = iptables -t nat -I POSTROUTING 1 -s 10.0.0.0/24 -o eth0 -j MASQUERADE
+	PostUp = iptables -I INPUT 1 -i wg0 -j ACCEPT
+	PostUp = iptables -I FORWARD 1 -i eth0 -o wg0 -j ACCEPT
+	PostUp = iptables -I FORWARD 1 -i wg0 -o eth0 -j ACCEPT
+    	PostDown = iptables -t nat -D POSTROUTING -s 10.0.0.0/24 -o eth0 -j MASQUERADE
+	PostDown = iptables -D INPUT -i wg0 -j ACCEPT
+	PostDown = iptables -D FORWARD -i eth0 -o wg0 -j ACCEPT
+	PostDown = iptables -D FORWARD -i wg0 -o eth0 -j ACCEPT
 
-This will run on Linux; however you should instead use the kernel module, which is faster and better integrated into the OS. See the [installation page](https://www.wireguard.com/install/) for instructions.
+	[Peer]
+    	#publickey of client
+	PublicKey = J3wlDiIOaEiGImF8dZbCmCssqduBjcgtChcNXs9PjSo=
+	AllowedIPs = 10.0.0.2/32
 
-### macOS
+--------------------------------------
 
-This runs on macOS using the utun driver. It does not yet support sticky sockets, and won't support fwmarks because of Darwin limitations. Since the utun driver cannot have arbitrary interface names, you must either use `utun[0-9]+` for an explicit interface name or `utun` to have the kernel select one for you. If you choose `utun` as the interface name, and the environment variable `WG_TUN_NAME_FILE` is defined, then the actual name of the interface chosen by the kernel is written to the file specified by that variable.
+### step-9: Ip forwarding - other devices on the network will connect to server
+    sysctl -w net.ipv4.ip_forward=1
 
-### Windows
 
-This runs on Windows, but you should instead use it from the more [fully featured Windows app](https://git.zx2c4.com/wireguard-windows/about/), which uses this as a module.
+### step-10: Create wg0.conf file in client and paste the below content
+	sudo nano /etc/wireguard/wg0.conf
 
-### FreeBSD
+   	#This client is using the VPN for internet access.
+	[Interface]
+              #privatekey of client
+	PrivateKey = wJ91tXL92kYM7bQFJhlFOY6hQtbGfEU07f+EPiexN3Q=
+	Address = 10.0.0.2/24
+	MTU=1384
 
-This will run on FreeBSD. It does not yet support sticky sockets. Fwmark is mapped to `SO_USER_COOKIE`.
+	[Peer]
+              #publickey of server
+	PublicKey = 78eIdV4yEnLgB2ecXmViEc9/Y3PIhYxwIdUT9mIVry0=
+              Endpoint = 35.172.27.241:51820
+              AllowedIPs = 10.0.0.0/24,172.31.0.0/24
+-----------------------------------
 
-### OpenBSD
+## Below steps(11-17) needs to be done for user-space in client and server
 
-This will run on OpenBSD. It does not yet support sticky sockets. Fwmark is mapped to `SO_RTABLE`. Since the tun driver cannot have arbitrary interface names, you must either use `tun[0-9]+` for an explicit interface name or `tun` to have the program select one for you. If you choose `tun` as the interface name, and the environment variable `WG_TUN_NAME_FILE` is defined, then the actual name of the interface chosen by the kernel is written to the file specified by that variable.
+### step-11: Download wireguard-go source from below path and build
+    git clone https://github.com/davidmurali/wireguard.git
 
-## Building
+### step-12: Download wg-quick-go source from below path
+    https://github.com/davidmurali/wg-quick-go.git
 
-This requires an installation of [go](https://golang.org) ≥ 1.18.
+wg-quick-go usually runs native space.
+So, we modified the code to run user space wireguard
 
-```
-$ git clone https://git.zx2c4.com/wireguard-go
-$ cd wireguard-go
-$ make
-```
+### step-13: Build wg-quick-go
+    cd wg-quick-go/cmd/wg-quick
+    go build -v -o wg-quick
 
-## License
+### step-14: Copy the executable to /usr/bin
+    cp wg-quick /usr/bin/
 
-    Copyright (C) 2017-2021 WireGuard LLC. All Rights Reserved.
-    
-    Permission is hereby granted, free of charge, to any person obtaining a copy of
-    this software and associated documentation files (the "Software"), to deal in
-    the Software without restriction, including without limitation the rights to
-    use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-    of the Software, and to permit persons to whom the Software is furnished to do
-    so, subject to the following conditions:
-    
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-    
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
+### step-15: Open the terminal and run 
+    ./wireguard-go wg0
+
+### step-16: Start the wireguard userspace tool
+    wg-quick up wg0	
+
+### step-17: Check the connection between server and client
+    wg show
