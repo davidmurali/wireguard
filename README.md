@@ -10,28 +10,23 @@
 ### step-2: Create a private and public key
      wg genkey | sudo tee /etc/wireguard/private.key
      sudo chmod go= /etc/wireguard/private.key
-
-### step-3: Download and install go
-    wget https://go.dev/dl/go1.18.3.linux-amd64.tar.gz
-    tar -xf go1.18.3.linux-amd64.tar.gz
-    mv ./go /usr/local
 	
-### step-4: Setting up the go env variable in profile
+### step-3: Setting up the go env variable in profile
     nano ~/.profile
 
-### step-5: Add below to end of file (~/.profile)
+### step-4: Add below to end of file (~/.profile)
     export PATH=$PATH:/usr/local/go/bin
 
-### step-6: Save env variables
+### step-5: Save env variables
     source ~/.profile
 
-### step-7: Create link for resolvconf, to use a peer as a DNS server
+### step-6: Create link for resolvconf, to use a peer as a DNS server
     ln -s /usr/bin/resolvectl /usr/local/bin/resolvconf
     apt-get install build-essential
 
-## Above steps(1-7) needs to be done for both client and server
+## Above steps(1-6) needs to be done for both client and server
 
-### step-8: Create wg0.conf file in server and paste the below content
+### step-7: Create wg0.conf file in server and paste the below content
 	sudo nano /etc/wireguard/wg0.conf
 
 	[Interface]
@@ -56,11 +51,11 @@
 
 --------------------------------------
 
-### step-9: Ip forwarding - other devices on the network will connect to server
+### step-8: Ip forwarding - other devices on the network will connect to server
     sysctl -w net.ipv4.ip_forward=1
 
 
-### step-10: Create wg0.conf file in client and paste the below content
+### step-9: Create wg0.conf file in client and paste the below content
 	sudo nano /etc/wireguard/wg0.conf
 
    	#This client is using the VPN for internet access.
@@ -77,8 +72,13 @@
               AllowedIPs = 10.0.0.0/24,172.31.0.0/24
 -----------------------------------
 
-## Below steps(11-17) needs to be done for user-space in client and server
+## Below steps(10-17) needs to be done for user-space in client and server
 
+### step-10: Download and install go
+    wget https://go.dev/dl/go1.18.3.linux-amd64.tar.gz
+    tar -xf go1.18.3.linux-amd64.tar.gz
+    mv ./go /usr/local
+    
 ### step-11: Download wireguard-go source from below path and build
     git clone https://github.com/davidmurali/wireguard.git
 
